@@ -101,3 +101,68 @@ def test_signature_reversal_accepts_signed_query(enricher):
     assert adata.obs["signature_reversal_rank"].idxmin() == "reverse"
     np.testing.assert_allclose(adata.obs.loc["reverse", "signature_reversal_score"], 1.0)
     np.testing.assert_allclose(adata.obs.loc["mimic", "signature_reversal_score"], -1.0)
+
+
+def test_signature_reversal_uses_layer_and_gene_symbols(enricher):
+    adata = AnnData(
+        X=np.zeros((2, 2)),
+        obs=pd.DataFrame(index=["reverse", "mimic"]),
+        var=pd.DataFrame({"symbol": ["up", "down"]}, index=["ens1", "ens2"]),
+    )
+    adata.layers["signatures"] = np.array([[-1.0, 1.0], [1.0, -1.0]])
+
+    enricher.signature_reversal(
+        adata,
+        up_genes=["up"],
+        down_genes=["down"],
+        layer="signatures",
+        gene_symbols_key="symbol",
+        key_added="sr",
+    )
+
+    assert adata.obs["sr_rank"].idxmin() == "reverse"
+    assert adata.uns["sr"]["layer"] == "signatures"
+    assert adata.uns["sr"]["gene_symbols_key"] == "symbol"
+
+
+@pytest.mark.parametrize(
+    ("query", "values"),
+    [
+        ({"up_genes": ["gene"]}, [[-1.0, 1.0], [1.0, -1.0]]),
+        ({"down_genes": ["gene"]}, [[1.0, -1.0], [-1.0, 1.0]]),
+    ],
+)
+def test_signature_reversal_accepts_one_sided_query(enricher, query, values):
+    adata = AnnData(
+        X=np.array(values),
+        obs=pd.DataFrame(index=["reverse", "mimic"]),
+    )
+    adata.var_names = ["gene", "other"]
+
+    enricher.signature_reversal(adata, **query)
+
+    assert adata.obs["signature_reversal_rank"].idxmin() == "reverse"
+
+
+@pytest.mark.parametrize(
+    ("query", "match"),
+    [
+        ({"query_signature": {"gene1": 1.0}, "up_genes": ["gene1"]}, "Pass either"),
+        ({"up_genes": ["gene1"], "down_genes": ["gene1"]}, "occurs in both"),
+        ({"query_signature": {"gene1": 0.0}}, "at least one non-zero"),
+        ({"up_genes": ["missing"]}, "Only 0 query genes"),
+        ({"up_genes": ["gene1"], "min_genes": 0}, "`min_genes` must be at least 1"),
+        ({"up_genes": ["gene1"], "layer": "missing"}, "Layer 'missing' does not exist"),
+        ({"up_genes": ["gene1"], "gene_symbols_key": "missing"}, "Column 'missing' does not exist"),
+    ],
+)
+def test_signature_reversal_rejects_invalid_input(enricher, query, match):
+    adata = AnnData(
+        X=np.ones((1, 2)),
+        obs=pd.DataFrame(index=["perturbation"]),
+        var=pd.DataFrame({"symbol": ["gene1", "gene2"]}),
+    )
+    adata.var_names = ["gene1", "gene2"]
+
+    with pytest.raises(ValueError, match=match):
+        enricher.signature_reversal(adata, **query)
