@@ -144,6 +144,30 @@ def test_signature_reversal_accepts_one_sided_query(enricher, query, values):
     assert adata.obs["signature_reversal_rank"].idxmin() == "reverse"
 
 
+def test_signature_reversal_returns_zero_when_query_sets_move_together(enricher):
+    adata = AnnData(
+        X=np.array([[3.0, 2.0, 0.0]]),
+        obs=pd.DataFrame(index=["same_direction"]),
+    )
+    adata.var_names = ["up", "down", "other"]
+
+    enricher.signature_reversal(adata, up_genes=["up"], down_genes=["down"])
+
+    np.testing.assert_allclose(adata.obs.loc["same_direction", "signature_reversal_connectivity"], 0.0)
+
+
+def test_signature_reversal_returns_nan_without_background_genes(enricher):
+    adata = AnnData(
+        X=np.array([[1.0]]),
+        obs=pd.DataFrame(index=["all_hits"]),
+    )
+    adata.var_names = ["gene"]
+
+    enricher.signature_reversal(adata, up_genes=["gene"])
+
+    assert np.isnan(adata.obs.loc["all_hits", "signature_reversal_score"])
+
+
 @pytest.mark.parametrize(
     ("query", "match"),
     [
