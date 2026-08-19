@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import pytest
 import scanpy as sc
 from anndata import AnnData
@@ -62,3 +63,41 @@ def test_hypergeometric_with_different_directions(dummy_adata, enricher, directi
     targets = {"group1": ["gene1", "gene2"]}
     results = enricher.hypergeometric(dummy_adata, targets=targets, direction=direction)
     assert isinstance(results, dict)
+
+
+def test_signature_reversal_cmap_writes_scores_to_adata(enricher):
+    labels = ["reverse", "mimic", "control"]
+    adata = AnnData(
+        X=np.array([[-1.0, 1.0], [1.0, -1.0], [0.0, 0.0]]),
+        obs=pd.DataFrame({"perturbation": labels}, index=labels),
+    )
+    adata.var_names = ["disease_up", "disease_down"]
+
+    enricher.signature_reversal(
+        adata,
+        up_genes=["disease_up"],
+        down_genes=["disease_down"],
+    )
+
+    assert adata.obs["signature_reversal_rank"].idxmin() == "reverse"
+    assert adata.obs.loc["reverse", "signature_reversal_score"] > adata.obs.loc["mimic", "signature_reversal_score"]
+    assert adata.obs.loc["reverse", "signature_reversal_connectivity"] < 0
+    np.testing.assert_allclose(adata.obs.loc["control", "signature_reversal_connectivity"], 0.0)
+    assert adata.uns["signature_reversal"]["matched_genes"] == ["disease_up", "disease_down"]
+
+
+def test_signature_reversal_accepts_signed_query(enricher):
+    adata = AnnData(
+        X=np.array([[-1.0, 1.0], [1.0, -1.0]]),
+        obs=pd.DataFrame(index=["reverse", "mimic"]),
+    )
+    adata.var_names = ["up", "down"]
+
+    enricher.signature_reversal(
+        adata,
+        pd.Series({"up": 1.0, "down": -1.0}),
+    )
+
+    assert adata.obs["signature_reversal_rank"].idxmin() == "reverse"
+    np.testing.assert_allclose(adata.obs.loc["reverse", "signature_reversal_score"], 1.0)
+    np.testing.assert_allclose(adata.obs.loc["mimic", "signature_reversal_score"], -1.0)

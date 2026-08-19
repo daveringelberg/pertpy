@@ -295,6 +295,7 @@ Enrichment tests for single-cell data assess whether specific biological pathway
 aiding in the identification of functional characteristics and cellular states.
 While pathway enrichment is a well-studied and commonly applied approach in single-cell RNA-seq, other data sources such as genes targeted by drugs can also be enriched.
 Drug2cell performs such enrichment tests and is available in pertpy {cite}`Kanemaru2023`.
+The same enrichment interface can also score CMap-style signature reversal on perturbation-level data, ranking perturbations that most strongly oppose a query signature.
 
 ```{eval-rst}
 .. autosummary::

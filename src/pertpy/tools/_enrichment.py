@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from anndata import AnnData
+from fast_array_utils.conv import to_dense
 from matplotlib.axes import Axes
 from scanpy.plotting import DotPlot
 from scanpy.tools._score_genes import _sparse_nanmean
@@ -54,6 +55,98 @@ def _mean(X, names, axis):
     else:
         obs_avg = pd.Series(np.nanmean(X, axis=axis), index=names)
     return obs_avg
+
+
+def _get_signature_matrix(adata: AnnData, layer: str | None) -> np.ndarray:
+    if layer is not None:
+        if layer not in adata.layers:
+            raise ValueError(f"Layer {layer!r} does not exist in the .layers attribute.")
+        matrix = adata.layers[layer]
+    else:
+        matrix = adata.X
+    return np.asarray(to_dense(matrix), dtype=float)
+
+
+def _get_signature_genes(adata: AnnData, gene_symbols_key: str | None) -> np.ndarray:
+    if gene_symbols_key is None:
+        return adata.var_names.astype(str).to_numpy()
+
+    var = cast_frame(adata.var)
+    if gene_symbols_key not in var:
+        raise ValueError(f"Column {gene_symbols_key!r} does not exist in the .var attribute.")
+    return var[gene_symbols_key].astype(str).to_numpy()
+
+
+def _prepare_query_signature(
+    query_signature: Mapping[str, float] | pd.Series | None,
+    up_genes: Sequence[str] | None,
+    down_genes: Sequence[str] | None,
+) -> pd.Series:
+    if query_signature is not None and (up_genes is not None or down_genes is not None):
+        raise ValueError("Pass either `query_signature` or `up_genes`/`down_genes`, not both.")
+
+    if query_signature is not None:
+        if isinstance(query_signature, pd.Series):
+            signature = query_signature.astype(float)
+        else:
+            signature = pd.Series(dict(query_signature), dtype=float)
+    else:
+        values: dict[str, float] = {}
+        for gene in () if up_genes is None else up_genes:
+            values[str(gene)] = 1.0
+        for gene in () if down_genes is None else down_genes:
+            gene_name = str(gene)
+            if gene_name in values:
+                raise ValueError(f"Gene {gene_name!r} occurs in both `up_genes` and `down_genes`.")
+            values[gene_name] = -1.0
+        signature = pd.Series(values, dtype=float)
+
+    signature.index = signature.index.astype(str)
+    signature = signature.groupby(signature.index).mean().replace(0, np.nan).dropna()
+    if signature.empty:
+        raise ValueError("The query signature must contain at least one non-zero gene.")
+    return signature
+
+
+def _weighted_enrichment_score(values: np.ndarray, hits: np.ndarray) -> float:
+    valid = np.isfinite(values)
+    values = values[valid]
+    hits = hits[valid]
+    n_hits = int(hits.sum())
+    n_misses = len(hits) - n_hits
+    if n_hits == 0 or n_misses == 0:
+        return float("nan")
+
+    order = np.argsort(values, kind="mergesort")[::-1]
+    ranked_hits = hits[order]
+    ranked_weights = np.abs(values[order])
+    hit_weights = ranked_weights * ranked_hits
+    hit_weight_sum = hit_weights.sum()
+    hit_step = ranked_hits / n_hits if hit_weight_sum == 0 else hit_weights / hit_weight_sum
+    miss_step = (~ranked_hits) / n_misses
+    running = np.cumsum(hit_step - miss_step)
+    max_score = float(running.max())
+    min_score = float(running.min())
+    return max_score if abs(max_score) >= abs(min_score) else min_score
+
+
+def _cmap_connectivity(values: np.ndarray, up_mask: np.ndarray, down_mask: np.ndarray) -> float:
+    query_mask = up_mask | down_mask
+    query_values = values[query_mask]
+    query_values = query_values[np.isfinite(query_values)]
+    if len(query_values) == 0 or np.allclose(query_values, 0.0):
+        return 0.0
+
+    es_up = _weighted_enrichment_score(values, up_mask) if up_mask.any() else float("nan")
+    es_down = _weighted_enrichment_score(values, down_mask) if down_mask.any() else float("nan")
+
+    if up_mask.any() and down_mask.any():
+        if np.sign(es_up) == np.sign(es_down):
+            return 0.0
+        return float((es_up - es_down) / 2.0)
+    if up_mask.any():
+        return es_up
+    return float(-es_down)
 
 
 class Enrichment:
@@ -151,6 +244,89 @@ class Enrichment:
         for drug in weights.columns:
             adata.uns[f"{key_added}_genes"]["var"].loc[drug, "genes"] = "|".join(adata.var_names[target_groups[drug]])
             adata.uns[f"{key_added}_all_genes"]["var"].loc[drug, "all_genes"] = "|".join(full_targets[drug])
+
+    def signature_reversal(
+        self,
+        adata: AnnData,
+        query_signature: Mapping[str, float] | pd.Series | None = None,
+        *,
+        up_genes: Sequence[str] | None = None,
+        down_genes: Sequence[str] | None = None,
+        layer: str | None = None,
+        gene_symbols_key: str | None = None,
+        min_genes: int = 1,
+        key_added: str = "signature_reversal",
+    ) -> None:
+        """Score perturbations by how strongly they reverse a disease/query signature.
+
+        Operates on a perturbation-level AnnData object where observations are perturbations and variables are genes.
+        Positive query genes are expected to be up-regulated in the query state and negative genes down-regulated.
+        The resulting reversal score is high when a perturbation shows the opposite pattern.
+
+        Args:
+            adata: Perturbation-level AnnData with perturbations as observations and genes as variables.
+            query_signature: Signed query signature. Positive values indicate query-up genes and negative values
+                query-down genes.
+            up_genes: Query-up genes. Used when `query_signature` is not provided.
+            down_genes: Query-down genes. Used when `query_signature` is not provided.
+            layer: Layer containing perturbation signatures. Defaults to `.X`.
+            gene_symbols_key: Optional `.var` column used to match query gene names instead of `.var_names`.
+            min_genes: Minimum number of query genes that must be present in `adata`.
+            key_added: Prefix used to store results in `.obs` and `.uns`.
+
+        Returns:
+            Updates `adata` with `{key_added}_score`, `{key_added}_connectivity` and `{key_added}_rank` in `.obs`,
+            and query metadata in `.uns[key_added]`.
+
+        Examples:
+            >>> import pertpy as pt
+            >>> enr = pt.tl.Enrichment()
+            >>> enr.signature_reversal(ps_adata, up_genes=["IL6"], down_genes=["CCR7"])
+        """
+        if min_genes < 1:
+            raise ValueError("`min_genes` must be at least 1.")
+
+        matrix = _get_signature_matrix(adata, layer)
+        genes = _get_signature_genes(adata, gene_symbols_key)
+        query = _prepare_query_signature(query_signature, up_genes, down_genes)
+        aligned_query = query.reindex(genes).to_numpy(dtype=float)
+        present = np.isfinite(aligned_query)
+        n_present = int(present.sum())
+        if n_present < min_genes:
+            raise ValueError(f"Only {n_present} query genes are present in `adata`; at least {min_genes} are required.")
+
+        up_mask = aligned_query > 0
+        down_mask = aligned_query < 0
+        connectivity_scores = np.empty(adata.n_obs, dtype=float)
+        for idx, values in enumerate(matrix):
+            connectivity_scores[idx] = _cmap_connectivity(values, up_mask, down_mask)
+
+        score_key = f"{key_added}_score"
+        connectivity_key = f"{key_added}_connectivity"
+        rank_key = f"{key_added}_rank"
+        reversal_scores = -connectivity_scores
+        adata.obs[score_key] = reversal_scores
+        adata.obs[connectivity_key] = connectivity_scores
+        adata.obs[rank_key] = (
+            pd.Series(reversal_scores, index=adata.obs_names)
+            .rank(ascending=False, method="min", na_option="bottom")
+            .astype("Int64")
+        )
+        adata.uns[key_added] = {
+            "score_key": score_key,
+            "connectivity_key": connectivity_key,
+            "rank_key": rank_key,
+            "method": "cmap",
+            "layer": layer,
+            "gene_symbols_key": gene_symbols_key,
+            "min_genes": min_genes,
+            "query_signature": query.to_dict(),
+            "up_genes": query.index[query > 0].tolist(),
+            "down_genes": query.index[query < 0].tolist(),
+            "matched_genes": genes[present].tolist(),
+            "n_query_genes": int(len(query)),
+            "n_matched_genes": n_present,
+        }
 
     @deprecated_arg(
         "pvals_adj_thresh",
