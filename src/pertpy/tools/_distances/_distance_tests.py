@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,14 @@ from ._distances import Distance, Metric
 
 if TYPE_CHECKING:
     from anndata import AnnData
+
+
+def _permutation_pvalues(results: list[pd.DataFrame], df: pd.DataFrame, n_perms: int) -> pd.Series:
+    """Fraction of permutations that reached a larger distance than the observed one, per group of `df`."""
+    comparison_results = pd.concat([r["distance"] - df["distance"] for r in results], axis=1) > 0
+    n_failures = comparison_results.sum(axis=1).clip(lower=1).reindex(df.index)
+
+    return n_failures / n_perms
 
 
 class DistanceTest:
@@ -47,7 +55,7 @@ class DistanceTest:
 
     @deprecated_arg(  # type: ignore[misc]
         "alpha",
-        cast("Deprecation", Deprecation("1.1.2", "Use `padj_threshold`.")),
+        Deprecation("1.1.2", "Use `padj_threshold`."),
     )
     def __init__(
         self,
@@ -191,13 +199,7 @@ class DistanceTest:
             df.loc[group, "distance"] = self.distance(X, Y)
 
         # Evaluate the test
-        # count times shuffling resulted in larger distance
-        comparison_results = np.array(
-            pd.concat([r["distance"] - df["distance"] for r in results], axis=1) > 0,
-            dtype=int,
-        )
-        n_failures = pd.Series(np.clip(np.sum(comparison_results, axis=1), 1, np.inf), index=df.index)
-        pvalues = n_failures / self.n_perms
+        pvalues = _permutation_pvalues(results, df, self.n_perms)
 
         # Apply multiple testing correction
         significant_adj, pvalue_adj, _, _ = multipletests(
@@ -305,13 +307,7 @@ class DistanceTest:
             df.loc[group, "distance"] = distance_result
 
         # Evaluate the test
-        # count times shuffling resulted in larger distance
-        comparison_results = np.array(
-            pd.concat([r["distance"] - df["distance"] for r in results], axis=1) > 0,
-            dtype=int,
-        )
-        n_failures = pd.Series(np.clip(np.sum(comparison_results, axis=1), 1, np.inf), index=df.index)
-        pvalues = n_failures / self.n_perms
+        pvalues = _permutation_pvalues(results, df, self.n_perms)
 
         # Apply multiple testing correction
         significant_adj, pvalue_adj, _, _ = multipletests(
