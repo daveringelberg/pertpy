@@ -316,6 +316,63 @@ pt_enricher = pt.tl.Enrichment()
 pt_enricher.score(adata)
 ```
 
+#### Signature reversal
+
+`Enrichment.signature_reversal` computes a raw [weighted connectivity score
+(WTCS)](https://clue.io/connectopedia/cmap_algorithms) and stores both connectivity and its negative, the reversal
+score, in `adata.obs`. Higher reversal scores indicate stronger transcriptional opposition to the query. This is not
+a normalized CMap score: it does not compute NCS, tau, p-values, or false-discovery rates.
+
+The input matrix must contain finite, signed perturbation effects relative to appropriate matched controls, such as
+z-scores, log-fold changes, or control-subtracted expression. Do not use raw or pseudobulk mean expression directly.
+The up and down sets should represent genes differentially expressed in the query state relative to its reference.
+For a simple single-context dataset, cell-level effects can be computed before aggregation:
+
+```python
+cell_adata = sc.read_h5ad("perturbation_data.h5ad")
+ps = pt.tl.PseudobulkSpace()
+diff_adata = ps.compute_control_diff(
+    cell_adata,
+    target_col="perturbation",
+    reference_key="control",
+)
+ps_adata = ps.compute(
+    diff_adata,
+    target_col="perturbation",
+    mode="mean",
+)
+
+up_genes = ["GENE1", "GENE2"]
+down_genes = ["GENE3", "GENE4"]
+enr = pt.tl.Enrichment()
+enr.signature_reversal(
+    ps_adata,
+    up_genes=up_genes,
+    down_genes=down_genes,
+)
+```
+
+The [CMap query guidance](https://clue.io/connectopedia/how_to_construct_cmap_queries) recommends approximately 10
+to 200 genes per query. A signed query can also be supplied, but only the sign of each value determines whether a
+gene belongs to the up or down set.
+
+Existing Scanpy plots can inspect the perturbation effects behind the highest-ranked candidates:
+
+```python
+top = ps_adata.obs.nsmallest(20, "signature_reversal_rank").index
+matched = set(ps_adata.uns["signature_reversal"]["matched_genes"])
+plot_genes = [gene for gene in up_genes + down_genes if gene in matched]
+sc.pl.matrixplot(
+    ps_adata[top],
+    var_names=plot_genes,
+    groupby="perturbation",
+)
+```
+
+A high reversal score is a hypothesis for follow-up, not evidence of therapeutic efficacy or safety. In particular,
+a perturbation can score highly by suppressing a compensatory or protective stress response. Results should therefore
+be interpreted together with biological context and orthogonal phenotypic, viability, and toxicity measurements.
+
 See [enrichment tutorial](https://pertpy.readthedocs.io/en/latest/tutorials/notebooks/enrichment.html).
 
 ## Distances and permutation tests
