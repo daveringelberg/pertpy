@@ -6,6 +6,7 @@ from anndata import AnnData
 from scipy import sparse
 
 import pertpy as pt
+from pertpy._types import cast_frame
 
 
 @pytest.fixture
@@ -238,7 +239,7 @@ def test_signature_reversal_groups_tied_values(enricher):
         adata = AnnData(X=np.array([[values[gene] for gene in genes]]), obs=pd.DataFrame(index=["perturbation"]))
         adata.var_names = genes
         enricher.signature_reversal(adata, up_genes=["query"])
-        return adata.obs.loc["perturbation", "signature_reversal_connectivity"]
+        return float(cast_frame(adata.obs)["signature_reversal_connectivity"].to_numpy(dtype=float)[0])
 
     np.testing.assert_allclose(score(["query", "tied", "high", "low"]), 1 / 3)
     np.testing.assert_allclose(score(["tied", "query", "high", "low"]), 1 / 3)

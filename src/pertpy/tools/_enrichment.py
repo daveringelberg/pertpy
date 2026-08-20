@@ -68,6 +68,7 @@ def _get_signature_matrix(adata: AnnData, layer: str | None) -> np.ndarray | CSB
 
 
 def _get_signature_genes(adata: AnnData, gene_symbols_key: str | None) -> np.ndarray:
+    raw_genes: pd.Index[Any] | pd.Series[Any]
     if gene_symbols_key is None:
         raw_genes = adata.var_names
     else:
