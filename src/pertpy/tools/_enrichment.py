@@ -151,7 +151,7 @@ def _weighted_enrichment_score(values: np.ndarray, hits: np.ndarray) -> float:
     hit_step = hit_weights / hit_weight_sum
     miss_step = (~ranked_hits) / n_misses
     tie_starts = np.r_[0, np.flatnonzero(ranked_values[1:] != ranked_values[:-1]) + 1]
-    running = np.cumsum(np.add.reduceat(hit_step - miss_step, tie_starts))
+    running: np.ndarray = np.cumsum(np.add.reduceat(hit_step - miss_step, tie_starts))
     running[-1] = 0.0
     max_score = float(running.max())
     min_score = float(running.min())
