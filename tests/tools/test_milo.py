@@ -184,6 +184,21 @@ def test_da_nhoods_non_unique_covariate(da_nhoods_mdata, milo):
         milo.da_nhoods(mdata, design="~phase")
 
 
+@pytest.fixture
+def unreplicated_mdata(adata, milo):
+    adata = adata.copy()
+    milo.make_nhoods(adata)
+    rng = np.random.default_rng(seed=42)
+    adata.obs["condition"] = rng.choice(["ConditionA", "ConditionB"], size=adata.n_obs)
+    adata.obs["sample"] = adata.obs["condition"].map({"ConditionA": "S1", "ConditionB": "S2"})
+    return milo.count_nhoods(adata, sample_col="sample")
+
+
+def test_da_nhoods_without_replication(unreplicated_mdata, milo, solver):
+    with pytest.raises(ValueError, match="residual degrees of freedom"):
+        milo.da_nhoods(unreplicated_mdata, design="~condition", solver=solver)
+
+
 def test_da_nhoods_pvalues(da_nhoods_mdata, milo, solver):
     mdata = da_nhoods_mdata.copy()
     milo.da_nhoods(mdata, design="~condition", solver=solver)
@@ -431,6 +446,30 @@ def test_plot_de_nhood_graph(de_nhoods_mdata, milo):
     assert fig is not None
     with pytest.raises(KeyError):
         milo.plot_de_nhood_graph(mdata, de, gene="not_a_real_gene")
+
+
+def test_plot_da_beeswarm_skips_unused_categories(da_nhoods_mdata, milo, solver):
+    """Cell types without a neighbourhood must not be drawn as empty rows."""
+    import matplotlib
+    import matplotlib.pyplot as plt
+
+    matplotlib.use("Agg")
+    plt.close("all")
+    mdata = da_nhoods_mdata.copy()
+    cell_type = mdata["rna"].obs["louvain"].astype(str).astype("category")
+    mdata["rna"].obs["cell_type"] = cell_type.cat.add_categories(["Unobserved"])
+    milo.da_nhoods(mdata, design="~condition", solver=solver)
+    milo.annotate_nhoods(mdata, anno_col="cell_type")
+
+    annotation = mdata["milo"].var["nhood_annotation"]
+    mdata["milo"].var["nhood_annotation"] = annotation.cat.add_categories(["nan"]).where(
+        np.arange(len(annotation)) > 0, "nan"
+    )
+
+    fig = milo.plot_da_beeswarm(mdata, return_fig=True)
+    labels = [label.get_text() for label in fig.axes[0].get_yticklabels()]
+
+    assert set(labels) == set(mdata["milo"].var["nhood_annotation"].astype(str)) - {"nan"}
 
 
 def test_de_nhoods_statsmodels_runs(de_nhoods_mdata, milo):
