@@ -282,37 +282,34 @@ class Enrichment:
     ) -> None:
         """Score perturbations by how strongly they reverse a disease/query signature.
 
-        This computes a raw CMap-style weighted connectivity score (WTCS) on a perturbation-level AnnData object,
-        where observations are perturbations and variables are genes. Values must be finite, signed perturbation
-        effects relative to an appropriate matched control, such as z-scores, log-fold changes, or control-subtracted
-        expression; raw or pseudobulk mean expression is not a perturbation signature.
+        This computes a raw CMap-style weighted connectivity score (WTCS) on a perturbation-level AnnData object, where observations are perturbations and variables are genes.
+        Values must be finite, signed perturbation effects relative to an appropriate matched control, such as z-scores, log-fold changes, or control-subtracted expression.
+        Raw or pseudobulk mean expression is not a perturbation signature.
 
-        Positive query genes are up-regulated in the query state and negative genes are down-regulated. Only the sign
-        of values in `query_signature` is used. Connectivity ranges from -1 (opposing) to 1 (similar), and the stored
-        reversal score is its negative so that higher values indicate stronger opposition. This method does not
-        compute CMap's normalized connectivity score, tau, p-values, or false-discovery rates. Genes with equal
-        perturbation values are treated as a single rank group so their input order cannot affect the score.
+        Positive query genes are up-regulated in the query state and negative genes are down-regulated.
+        Only the sign of values in `query_signature` is used.
+        Connectivity ranges from -1 (opposing) to 1 (similar), and the stored reversal score is its negative so that higher values indicate stronger opposition.
+        This method does not compute CMap's normalized connectivity score, tau, p-values, or false-discovery rates.
+        Genes with equal perturbation values are treated as a single rank group so their input order cannot affect the score.
 
-        A high reversal score is a hypothesis for follow-up, not evidence of efficacy or safety. In particular,
-        suppressing a compensatory or protective transcriptional response can also produce a high reversal score.
+        A high reversal score is a hypothesis for follow-up, not evidence of efficacy or safety.
+        In particular, suppressing a compensatory or protective transcriptional response can also produce a high reversal score.
 
         Args:
-            adata: Perturbation-level AnnData with perturbations as observations, genes as variables, and finite
-                signed perturbation effects relative to matched controls in `.X` or `layer`.
-            query_signature: Signed query signature. Positive values indicate query-up genes and negative values
-                query-down genes; magnitudes are ignored.
+            adata: Perturbation-level AnnData with perturbations as observations, genes as variables, and finite signed perturbation effects relative to matched controls in `.X` or `layer`.
+            query_signature: Signed query signature.
+                Positive values indicate query-up genes and negative values query-down genes; magnitudes are ignored.
             up_genes: Query-up genes. Used when `query_signature` is not provided.
             down_genes: Query-down genes. Used when `query_signature` is not provided.
             layer: Layer containing perturbation signatures. Defaults to `.X`.
-            gene_symbols_key: Optional `.var` column used to match query gene names instead of `.var_names`. Gene
-                identifiers used for matching must be unique and non-missing.
-            min_genes: Minimum total number of query genes that must be present in `adata`. CMap recommends query
-                sets containing roughly 10 to 200 genes; very small matches should be treated as exploratory.
+            gene_symbols_key: Optional `.var` column used to match query gene names instead of `.var_names`.
+                Gene identifiers used for matching must be unique and non-missing.
+            min_genes: Minimum total number of query genes that must be present in `adata`.
+                CMap recommends query sets containing roughly 10 to 200 genes; very small matches should be treated as exploratory.
             key_added: Prefix used to store results in `.obs` and `.uns`.
 
         Returns:
-            Updates `adata` with `{key_added}_score`, `{key_added}_connectivity` and `{key_added}_rank` in `.obs`,
-            and query metadata in `.uns[key_added]`.
+            Updates `adata` with `{key_added}_score`, `{key_added}_connectivity` and `{key_added}_rank` in `.obs`, and query metadata in `.uns[key_added]`.
 
         Examples:
             >>> import numpy as np
