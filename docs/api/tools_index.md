@@ -361,18 +361,6 @@ In a real analysis, use an independently derived disease or state signature.
 The [CMap query guidance](https://clue.io/connectopedia/how_to_construct_cmap_queries) recommends approximately 10 to 200 genes per query.
 A signed query can also be supplied, but only the sign of each value determines whether a gene belongs to the up or down set.
 
-Existing Scanpy plots can inspect the perturbation effects behind the highest-ranked candidates:
-
-```python
-top = ps_adata.obs.nsmallest(10, "signature_reversal_rank").index
-plot_genes = up_genes[:5] + down_genes[:5]
-sc.pl.matrixplot(
-    ps_adata[top],
-    var_names=plot_genes,
-    groupby="perturbation",
-)
-```
-
 A high reversal score is a hypothesis for follow-up, not evidence of therapeutic efficacy or safety.
 In particular, a perturbation can score highly by suppressing a compensatory or protective stress response.
 Results should therefore be interpreted together with biological context and orthogonal phenotypic, viability, and toxicity measurements.
